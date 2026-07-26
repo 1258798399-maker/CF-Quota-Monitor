@@ -1,0 +1,36 @@
+# Gradle
+.gradle/
+.kotlin/
+build/
+*/build/
+
+# Local configuration (contains machine-specific SDK path)
+local.properties
+
+# Signing — NEVER commit release keystores or credentials
+*.jks
+*.keystore
+keystore.properties
+
+# IDE
+.idea/
+*.iml
+.DS_Store
+
+# Logs
+*.log
+build_log*.txt
+captures/
+
+# Android build artifacts (keep source, drop output)
+*.apk
+*.aab
+*.ap_
+*.dex
+*.class
+
+# OS
+Thumbs.db
+
+# Crash reports from manual testing
+crash.log

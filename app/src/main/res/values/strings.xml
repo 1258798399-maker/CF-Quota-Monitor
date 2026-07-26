@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">CF 配额监控</string>
+    <string name="widget_name">Cloudflare 配额</string>
+    <string name="widget_description">在桌面实时查看 Workers/Pages 每日请求配额</string>
+</resources>
