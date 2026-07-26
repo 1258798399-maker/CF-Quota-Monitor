@@ -33,6 +33,18 @@ Cloudflare 免费版 Workers 每天有 10 万次请求额度，但官方仪表�
 
 ## 📸 功能总览
 
+<p align="center">
+  <img src="docs/screenshots/main-screen.jpg" width="30%" alt="应用主界面" />
+  &nbsp;&nbsp;
+  <img src="docs/screenshots/home-widget.jpg" width="30%" alt="桌面小组件" />
+  &nbsp;&nbsp;
+  <img src="docs/screenshots/settings-screen.jpg" width="30%" alt="设置页" />
+</p>
+
+<p align="center">
+  <em>应用主界面 · 桌面小组件 · 设置页</em>
+</p>
+
 | 功能         | 说明                                                           |
 | ---------- | ------------------------------------------------------------ |
 | **配额监控主页** | 三列数据面板（已用 / 剩余 / 百分比）+ 胶囊进度条，16dp 圆角卡片设计                     |
