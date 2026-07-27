@@ -222,7 +222,7 @@ private fun WidgetContent(
         .fillMaxSize()
         .background(GlanceTheme.colors.surface)
         .cornerRadius(16.dp)
-        .padding(12.dp)
+        .padding(14.dp)
         // Tapping anywhere on the widget opens the app. The refresh control
         // inside declares its own clickable, which takes precedence in its area.
         .clickable(actionStartActivity<MainActivity>())
@@ -243,7 +243,7 @@ private fun WidgetContent(
             )
             RefreshButton(loading = loading)
         }
-        Spacer(GlanceModifier.height(6.dp))
+        Spacer(GlanceModifier.height(8.dp))
 
         // v1.6.2 stale-fallback: if the latest fetch errored but we have a
         // previously-cached successful snapshot, show THAT snapshot's numbers
@@ -267,11 +267,16 @@ private fun WidgetContent(
                     StaleDataBanner(err.type)
                     Spacer(GlanceModifier.height(4.dp))
                 }
-                StatsContent(renderingData, countdownSeconds)
-                // v1.6.3: small "最后刷新" line at the very bottom, matching
-                // the in-app UsageCard so users can correlate the data they
-                // see with when it was actually pulled.
-                LastRefreshLine(updatedAtMillis, refreshing = loading)
+                // v1.6.6: StatsContent now embeds the "最后刷新" timestamp
+                // on the same horizontal line as the reset-countdown (right
+                // side), so no extra vertical space is needed and v1.6.2's
+                // layout positions are preserved exactly.
+                StatsContent(
+                    renderingData,
+                    countdownSeconds,
+                    updatedAtMillis = updatedAtMillis,
+                    refreshing = loading
+                )
             }
             usage is Resource.Error -> {
                 // No cached fallback yet (cold-start fail). Show the same set
@@ -301,7 +306,12 @@ private fun WidgetContent(
  * branches small and legible.
  */
 @Composable
-private fun StatsContent(d: UsageData, countdownSeconds: Long) {
+private fun StatsContent(
+    d: UsageData,
+    countdownSeconds: Long,
+    updatedAtMillis: Long,
+    refreshing: Boolean
+) {
     Text(
         text = "已用 ${Formatters.thousands(d.totalUsed)} (${Formatters.percent(d.usagePercent)}%)",
         style = TextStyle(
@@ -310,24 +320,48 @@ private fun StatsContent(d: UsageData, countdownSeconds: Long) {
             color = GlanceTheme.colors.onSurface
         )
     )
-    Spacer(GlanceModifier.height(4.dp))
+    Spacer(GlanceModifier.height(6.dp))
     LinearProgressIndicator(
         progress = d.fraction,
-        modifier = GlanceModifier.fillMaxWidth().height(8.dp).cornerRadius(6.dp),
+        modifier = GlanceModifier.fillMaxWidth().height(10.dp).cornerRadius(6.dp),
         color = ColorProvider(Brand),
         backgroundColor = GlanceTheme.colors.surfaceVariant
     )
-    Spacer(GlanceModifier.height(4.dp))
+    Spacer(GlanceModifier.height(10.dp))
     Row(modifier = GlanceModifier.fillMaxWidth()) {
         StatCell("WORKERS", Formatters.thousands(d.workersRequests), Green, GlanceModifier.defaultWeight())
         StatCell("PAGES", Formatters.thousands(d.pagesRequests), Brand, GlanceModifier.defaultWeight())
         StatCell("配额", Formatters.thousands(d.dailyQuota), Orange, GlanceModifier.defaultWeight())
     }
-    Spacer(GlanceModifier.height(4.dp))
-    Text(
-        text = "距重置 ${Formatters.countdown(countdownSeconds)} · ${Constants.RESET_HOUR_BEIJING}:00(UTC+8)",
-        style = TextStyle(fontSize = 11.sp, color = ColorProvider(Orange))
-    )
+    Spacer(GlanceModifier.height(8.dp))
+    // v1.6.6: the "最后刷新" timestamp is merged onto the SAME row as the
+    // reset-countdown line, so it adds zero vertical space and can never be
+    // pushed below the cell's visible area. Layout positions are now
+    // byte-identical to v1.6.2 — this is the only safe way to add the info
+    // without shifting existing elements upward (which broke v1.6.5's
+    // visual balance). The right-side timestamp uses the muted
+    // onSurfaceVariant token so the eye reads the reset countdown first.
+    Row(
+        modifier = GlanceModifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = "距重置 ${Formatters.countdown(countdownSeconds)} · ${Constants.RESET_HOUR_BEIJING}:00(UTC+8)",
+            style = TextStyle(fontSize = 11.sp, color = ColorProvider(Orange)),
+            modifier = GlanceModifier.defaultWeight()
+        )
+        if (updatedAtMillis > 0L) {
+            Spacer(GlanceModifier.width(6.dp))
+            Text(
+                text = "最后刷新 ${formatClock(updatedAtMillis)}" +
+                    if (refreshing) " · 正在获取" else "",
+                style = TextStyle(
+                    fontSize = 11.sp,
+                    color = GlanceTheme.colors.onSurfaceVariant
+                )
+            )
+        }
+    }
 }
 
 /**
@@ -387,12 +421,12 @@ private fun StatCell(label: String, value: String, color: Color, modifier: Glanc
     Column(modifier = modifier, horizontalAlignment = Alignment.CenterHorizontally) {
         Text(
             text = label,
-            style = TextStyle(fontSize = 9.sp, color = GlanceTheme.colors.onSurfaceVariant)
+            style = TextStyle(fontSize = 10.sp, color = GlanceTheme.colors.onSurfaceVariant)
         )
         Spacer(GlanceModifier.height(2.dp))
         Text(
             text = value,
-            style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.Bold, color = ColorProvider(color))
+            style = TextStyle(fontSize = 15.sp, fontWeight = FontWeight.Bold, color = ColorProvider(color))
         )
     }
 }
@@ -412,39 +446,20 @@ private fun CenterHint(text: String) {
 }
 
 /**
- * Small secondary line at the very bottom of the widget that mirrors the
- * "最后刷新：HH:mm:ss" text shown in `UsageCard.kt`. Format, locale and font
- * weight are deliberately kept identical so the two clocks always agree.
+ * Tiny secondary line that mirrors the "最后刷新：HH:mm:ss" text shown in
+ * `UsageCard.kt`. Format, locale and font weight are deliberately kept
+ * identical so the two clocks always agree.
  *
- * Three states, matching `UsageCard.CardHeader` exactly:
- *  - normal:                         `最后刷新：14:32:10`
- *  - mid-refresh after first success: `最后刷新：14:32:10 · 正在获取最新数据…`
- *  - first-ever fetch in flight:      `正在获取数据…` (primary-color, no
- *    timestamp shown yet because there isn't one to show)
- *
- * Spacing: 4dp between the reset-countdown line above and this line keeps the
- * two pieces of timing metadata visually distinct without inflating the
- * widget's natural height enough to risk clipping in the default 4x2 cell.
+ * v1.6.6: no longer a separate `Composable` — the text is now inlined on the
+ * SAME horizontal row as the reset-countdown line inside [StatsContent], so
+ * it adds zero vertical space and the widget's overall layout positions stay
+ * byte-identical to v1.6.2 (the v1.6.5 attempt to append it as a new line
+ * below the reset-countdown ended up being clipped/invisible on the user's
+ * launcher, AND the surrounding compaction shifted every element up). The
+ * inline merge is the only placement that satisfies both constraints:
+ *   1) "最后刷新" must be visible, and
+ *   2) v1.6.2's element positions must not move.
  */
-@Composable
-private fun LastRefreshLine(updatedAtMillis: Long, refreshing: Boolean) {
-    if (updatedAtMillis <= 0L) {
-        if (refreshing) {
-            Spacer(GlanceModifier.height(4.dp))
-            Text(
-                text = "正在获取数据…",
-                style = TextStyle(fontSize = 11.sp, color = ColorProvider(Brand))
-            )
-        }
-        return
-    }
-    Spacer(GlanceModifier.height(3.dp))
-    Text(
-        text = "最后刷新：${formatClock(updatedAtMillis)}" +
-            if (refreshing) " · 正在获取最新数据…" else "",
-        style = TextStyle(fontSize = 11.sp, color = GlanceTheme.colors.onSurfaceVariant)
-    )
-}
 
 // Mirrors `formatClock` in `ui/components/UsageCard.kt` so the widget's
 // "最后刷新" timestamp is byte-for-byte identical to the in-app one.
