@@ -44,6 +44,9 @@ import com.nova.cfquota.domain.model.UsageData
 import com.nova.cfquota.domain.usecase.GetResetCountdownUseCase
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 private val Brand = Color(0xFF2F65EC)
 private val Green = Color(0xFF00A86B)
@@ -60,7 +63,13 @@ private val Orange = Color(0xFFF59E0B)
  *                                even if [usage] flips to an [Resource.Error],
  *                                so an auto-refresh hiccup does not wipe the
  *                                user's view of their quota
- * @param updatedAtMillis         epoch millis of the latest completed refresh
+ * @param updatedAtMillis         epoch millis of the last *successful* refresh
+ *                                (0L until the first success). Mirrors
+ *                                `UsageUiState.lastUpdatedEpoch` in the app so
+ *                                the "最后刷新" timestamp we render at the
+ *                                bottom of the widget always reflects when the
+ *                                displayed numbers were actually fetched —
+ *                                never the moment a failed retry finished.
  */
 data class WidgetState(
     val loading: Boolean = false,
@@ -132,11 +141,20 @@ suspend fun refreshWidgetData(context: Context) {
         is Resource.Success -> result.data
         is Resource.Error -> previous.lastSuccess
     }
+    // Only bump `updatedAtMillis` on a successful fetch — mirrors
+    // UsageViewModel.kt. The "最后刷新" timestamp at the bottom of the widget
+    // must reflect when the *displayed* data was actually fetched; if we
+    // bumped it on every retry, a failed auto-refresh against cached numbers
+    // would falsely advertise stale data as fresh.
+    val nowUpdatedAt = when (result) {
+        is Resource.Success -> System.currentTimeMillis()
+        is Resource.Error -> previous.updatedAtMillis
+    }
     WidgetStore.state.value = WidgetState(
         loading = false,
         usage = result,
         lastSuccess = nowLastSuccess,
-        updatedAtMillis = System.currentTimeMillis()
+        updatedAtMillis = nowUpdatedAt
     )
     updateAllWidgets(context)
 }
@@ -157,11 +175,17 @@ class CfQuotaWidget : GlanceAppWidget() {
                 is Resource.Success -> r.data
                 is Resource.Error -> seed.lastSuccess
             }
+            // v1.6.3 invariant: only successful fetches advance the
+            // "最后刷新" timestamp — see refreshWidgetData() for rationale.
+            val nowUpdatedAt = when (r) {
+                is Resource.Success -> System.currentTimeMillis()
+                is Resource.Error -> seed.updatedAtMillis
+            }
             WidgetStore.state.value = WidgetState(
                 loading = false,
                 usage = r,
                 lastSuccess = nowLastSuccess,
-                updatedAtMillis = System.currentTimeMillis()
+                updatedAtMillis = nowUpdatedAt
             )
         }
         val countdown = GetResetCountdownUseCase().invoke()
@@ -177,7 +201,8 @@ class CfQuotaWidget : GlanceAppWidget() {
                     usage = state.usage,
                     loading = state.loading,
                     countdownSeconds = countdown,
-                    lastSuccess = state.lastSuccess
+                    lastSuccess = state.lastSuccess,
+                    updatedAtMillis = state.updatedAtMillis
                 )
             }
         }
@@ -190,7 +215,8 @@ private fun WidgetContent(
     usage: Resource<UsageData>?,
     loading: Boolean,
     countdownSeconds: Long,
-    lastSuccess: UsageData?
+    lastSuccess: UsageData?,
+    updatedAtMillis: Long
 ) {
     val bg = GlanceModifier
         .fillMaxSize()
@@ -242,6 +268,10 @@ private fun WidgetContent(
                     Spacer(GlanceModifier.height(4.dp))
                 }
                 StatsContent(renderingData, countdownSeconds)
+                // v1.6.3: small "最后刷新" line at the very bottom, matching
+                // the in-app UsageCard so users can correlate the data they
+                // see with when it was actually pulled.
+                LastRefreshLine(updatedAtMillis, refreshing = loading)
             }
             usage is Resource.Error -> {
                 // No cached fallback yet (cold-start fail). Show the same set
@@ -380,3 +410,45 @@ private fun CenterHint(text: String) {
         )
     }
 }
+
+/**
+ * Small secondary line at the very bottom of the widget that mirrors the
+ * "最后刷新：HH:mm:ss" text shown in `UsageCard.kt`. Format, locale and font
+ * weight are deliberately kept identical so the two clocks always agree.
+ *
+ * Three states, matching `UsageCard.CardHeader` exactly:
+ *  - normal:                         `最后刷新：14:32:10`
+ *  - mid-refresh after first success: `最后刷新：14:32:10 · 正在获取最新数据…`
+ *  - first-ever fetch in flight:      `正在获取数据…` (primary-color, no
+ *    timestamp shown yet because there isn't one to show)
+ *
+ * Spacing: 4dp between the reset-countdown line above and this line keeps the
+ * two pieces of timing metadata visually distinct without inflating the
+ * widget's natural height enough to risk clipping in the default 4x2 cell.
+ */
+@Composable
+private fun LastRefreshLine(updatedAtMillis: Long, refreshing: Boolean) {
+    if (updatedAtMillis <= 0L) {
+        if (refreshing) {
+            Spacer(GlanceModifier.height(4.dp))
+            Text(
+                text = "正在获取数据…",
+                style = TextStyle(fontSize = 11.sp, color = ColorProvider(Brand))
+            )
+        }
+        return
+    }
+    Spacer(GlanceModifier.height(4.dp))
+    Text(
+        text = "最后刷新：${formatClock(updatedAtMillis)}" +
+            if (refreshing) " · 正在获取最新数据…" else "",
+        style = TextStyle(fontSize = 11.sp, color = GlanceTheme.colors.onSurfaceVariant)
+    )
+}
+
+// Mirrors `formatClock` in `ui/components/UsageCard.kt` so the widget's
+// "最后刷新" timestamp is byte-for-byte identical to the in-app one.
+// SimpleDateFormat is not strictly thread-safe, but Glance composables run
+// on the main thread — the same one-liner pattern is used in UsageCard.
+private val TIME_FMT = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
+private fun formatClock(epochMs: Long): String = TIME_FMT.format(Date(epochMs))
