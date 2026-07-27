@@ -222,7 +222,7 @@ private fun WidgetContent(
         .fillMaxSize()
         .background(GlanceTheme.colors.surface)
         .cornerRadius(16.dp)
-        .padding(14.dp)
+        .padding(12.dp)
         // Tapping anywhere on the widget opens the app. The refresh control
         // inside declares its own clickable, which takes precedence in its area.
         .clickable(actionStartActivity<MainActivity>())
@@ -243,7 +243,7 @@ private fun WidgetContent(
             )
             RefreshButton(loading = loading)
         }
-        Spacer(GlanceModifier.height(8.dp))
+        Spacer(GlanceModifier.height(6.dp))
 
         // v1.6.2 stale-fallback: if the latest fetch errored but we have a
         // previously-cached successful snapshot, show THAT snapshot's numbers
@@ -310,20 +310,20 @@ private fun StatsContent(d: UsageData, countdownSeconds: Long) {
             color = GlanceTheme.colors.onSurface
         )
     )
-    Spacer(GlanceModifier.height(6.dp))
+    Spacer(GlanceModifier.height(4.dp))
     LinearProgressIndicator(
         progress = d.fraction,
-        modifier = GlanceModifier.fillMaxWidth().height(10.dp).cornerRadius(6.dp),
+        modifier = GlanceModifier.fillMaxWidth().height(8.dp).cornerRadius(6.dp),
         color = ColorProvider(Brand),
         backgroundColor = GlanceTheme.colors.surfaceVariant
     )
-    Spacer(GlanceModifier.height(6.dp))
+    Spacer(GlanceModifier.height(4.dp))
     Row(modifier = GlanceModifier.fillMaxWidth()) {
         StatCell("WORKERS", Formatters.thousands(d.workersRequests), Green, GlanceModifier.defaultWeight())
         StatCell("PAGES", Formatters.thousands(d.pagesRequests), Brand, GlanceModifier.defaultWeight())
         StatCell("配额", Formatters.thousands(d.dailyQuota), Orange, GlanceModifier.defaultWeight())
     }
-    Spacer(GlanceModifier.height(5.dp))
+    Spacer(GlanceModifier.height(4.dp))
     Text(
         text = "距重置 ${Formatters.countdown(countdownSeconds)} · ${Constants.RESET_HOUR_BEIJING}:00(UTC+8)",
         style = TextStyle(fontSize = 11.sp, color = ColorProvider(Orange))
@@ -387,12 +387,12 @@ private fun StatCell(label: String, value: String, color: Color, modifier: Glanc
     Column(modifier = modifier, horizontalAlignment = Alignment.CenterHorizontally) {
         Text(
             text = label,
-            style = TextStyle(fontSize = 10.sp, color = GlanceTheme.colors.onSurfaceVariant)
+            style = TextStyle(fontSize = 9.sp, color = GlanceTheme.colors.onSurfaceVariant)
         )
         Spacer(GlanceModifier.height(2.dp))
         Text(
             text = value,
-            style = TextStyle(fontSize = 15.sp, fontWeight = FontWeight.Bold, color = ColorProvider(color))
+            style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.Bold, color = ColorProvider(color))
         )
     }
 }
@@ -438,7 +438,7 @@ private fun LastRefreshLine(updatedAtMillis: Long, refreshing: Boolean) {
         }
         return
     }
-    Spacer(GlanceModifier.height(4.dp))
+    Spacer(GlanceModifier.height(3.dp))
     Text(
         text = "最后刷新：${formatClock(updatedAtMillis)}" +
             if (refreshing) " · 正在获取最新数据…" else "",
