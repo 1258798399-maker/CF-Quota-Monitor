@@ -36,8 +36,8 @@ android {
         applicationId = "com.nova.cfquota"
         minSdk = 26
         targetSdk = 36
-        versionCode = 12
-        versionName = "1.6.3"
+        versionCode = 13
+        versionName = "1.6.4"
 
         vectorDrawables { useSupportLibrary = true }
     }

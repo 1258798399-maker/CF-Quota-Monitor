@@ -317,13 +317,13 @@ private fun StatsContent(d: UsageData, countdownSeconds: Long) {
         color = ColorProvider(Brand),
         backgroundColor = GlanceTheme.colors.surfaceVariant
     )
-    Spacer(GlanceModifier.height(10.dp))
+    Spacer(GlanceModifier.height(6.dp))
     Row(modifier = GlanceModifier.fillMaxWidth()) {
         StatCell("WORKERS", Formatters.thousands(d.workersRequests), Green, GlanceModifier.defaultWeight())
         StatCell("PAGES", Formatters.thousands(d.pagesRequests), Brand, GlanceModifier.defaultWeight())
         StatCell("配额", Formatters.thousands(d.dailyQuota), Orange, GlanceModifier.defaultWeight())
     }
-    Spacer(GlanceModifier.height(8.dp))
+    Spacer(GlanceModifier.height(5.dp))
     Text(
         text = "距重置 ${Formatters.countdown(countdownSeconds)} · ${Constants.RESET_HOUR_BEIJING}:00(UTC+8)",
         style = TextStyle(fontSize = 11.sp, color = ColorProvider(Orange))
