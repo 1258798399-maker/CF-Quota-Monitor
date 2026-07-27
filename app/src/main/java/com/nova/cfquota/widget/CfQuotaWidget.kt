@@ -51,10 +51,21 @@ private val Orange = Color(0xFFF59E0B)
 
 /**
  * Immutable snapshot of what the widget should display.
+ *
+ * @param loading                 whether a refresh is currently in flight
+ * @param usage                   the LATEST [Resource] from the most recent
+ *                                refresh attempt (may be `Error`)
+ * @param lastSuccess             cached snapshot of the most recent
+ *                                [Resource.Success] data — kept on screen
+ *                                even if [usage] flips to an [Resource.Error],
+ *                                so an auto-refresh hiccup does not wipe the
+ *                                user's view of their quota
+ * @param updatedAtMillis         epoch millis of the latest completed refresh
  */
 data class WidgetState(
     val loading: Boolean = false,
     val usage: Resource<UsageData>? = null,
+    val lastSuccess: UsageData? = null,
     val updatedAtMillis: Long = 0L
 )
 
@@ -94,6 +105,13 @@ suspend fun updateAllWidgets(context: Context) {
  * Performs the network fetch HERE (not inside provideGlance), publishes a
  * transient loading state first, then the final result. All active widget
  * sessions repaint reactively; dead sessions are woken by [updateAllWidgets].
+ *
+ * v1.6.2 fix: when the fetch ends in [Resource.Error] we *also* preserve
+ * [WidgetState.lastSuccess] so the widget can render the previously-good
+ * numbers (instead of erasing them and showing nothing but an error message).
+ * Without this, an auto-refresh blip every 15 minutes would leave the widget
+ * stuck on a misleading "Account ID 错误" hint even after the very next
+ * in-app manual refresh succeeded.
  */
 suspend fun refreshWidgetData(context: Context) {
     val repo = AppContainer(context).repository
@@ -104,13 +122,20 @@ suspend fun refreshWidgetData(context: Context) {
         return
     }
     // 1) Show unmistakable "refreshing" feedback right away.
-    WidgetStore.state.value = WidgetStore.state.value.copy(loading = true)
+    val previous = WidgetStore.state.value
+    WidgetStore.state.value = previous.copy(loading = true)
     updateAllWidgets(context)
-    // 2) Real fetch (same no-cache pipeline as the app), then publish result.
+    // 2) Real fetch (same no-cache pipeline as the app + one silent retry on
+    //    transient errors — see CloudflareRepositoryImpl), then publish result.
     val result = repo.getTodayUsage(settings)
+    val nowLastSuccess = when (result) {
+        is Resource.Success -> result.data
+        is Resource.Error -> previous.lastSuccess
+    }
     WidgetStore.state.value = WidgetState(
         loading = false,
         usage = result,
+        lastSuccess = nowLastSuccess,
         updatedAtMillis = System.currentTimeMillis()
     )
     updateAllWidgets(context)
@@ -128,9 +153,14 @@ class CfQuotaWidget : GlanceAppWidget() {
         val seed = WidgetStore.state.value
         if (initialSettings.isConfigured && seed.usage == null && !seed.loading) {
             val r = repo.getTodayUsage(initialSettings)
+            val nowLastSuccess = when (r) {
+                is Resource.Success -> r.data
+                is Resource.Error -> seed.lastSuccess
+            }
             WidgetStore.state.value = WidgetState(
                 loading = false,
                 usage = r,
+                lastSuccess = nowLastSuccess,
                 updatedAtMillis = System.currentTimeMillis()
             )
         }
@@ -146,7 +176,8 @@ class CfQuotaWidget : GlanceAppWidget() {
                     configured = settings.isConfigured,
                     usage = state.usage,
                     loading = state.loading,
-                    countdownSeconds = countdown
+                    countdownSeconds = countdown,
+                    lastSuccess = state.lastSuccess
                 )
             }
         }
@@ -158,7 +189,8 @@ private fun WidgetContent(
     configured: Boolean,
     usage: Resource<UsageData>?,
     loading: Boolean,
-    countdownSeconds: Long
+    countdownSeconds: Long,
+    lastSuccess: UsageData?
 ) {
     val bg = GlanceModifier
         .fillMaxSize()
@@ -187,43 +219,43 @@ private fun WidgetContent(
         }
         Spacer(GlanceModifier.height(8.dp))
 
+        // v1.6.2 stale-fallback: if the latest fetch errored but we have a
+        // previously-cached successful snapshot, show THAT snapshot's numbers
+        // instead of clearing the screen and only displaying an error message.
+        // The error is still surfaced via a thin banner so the user knows the
+        // data may be a few minutes old. This eliminates the v1.6.1 "stuck on
+        // Account ID 错误 for 15+ minutes" failure mode (the user's most
+        // frequent reported bug at v1.6.2).
+        val staleError: Resource.Error? =
+            (usage as? Resource.Error)?.takeIf { lastSuccess != null }
+        val renderingData: UsageData? = when (val u = usage) {
+            is Resource.Success -> u.data
+            is Resource.Error -> lastSuccess
+            null -> null
+        }
+
         when {
             !configured -> CenterHint("点击打开应用以配置凭据")
-            usage is Resource.Success -> {
-                val d = usage.data
-                Text(
-                    text = "已用 ${Formatters.thousands(d.totalUsed)} (${Formatters.percent(d.usagePercent)}%)",
-                    style = TextStyle(
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = GlanceTheme.colors.onSurface
-                    )
-                )
-                Spacer(GlanceModifier.height(6.dp))
-                LinearProgressIndicator(
-                    progress = d.fraction,
-                    modifier = GlanceModifier.fillMaxWidth().height(10.dp).cornerRadius(6.dp),
-                    color = ColorProvider(Brand),
-                    backgroundColor = GlanceTheme.colors.surfaceVariant
-                )
-                Spacer(GlanceModifier.height(10.dp))
-                Row(modifier = GlanceModifier.fillMaxWidth()) {
-                    StatCell("WORKERS", Formatters.thousands(d.workersRequests), Green, GlanceModifier.defaultWeight())
-                    StatCell("PAGES", Formatters.thousands(d.pagesRequests), Brand, GlanceModifier.defaultWeight())
-                    StatCell("配额", Formatters.thousands(d.dailyQuota), Orange, GlanceModifier.defaultWeight())
+            renderingData != null -> {
+                staleError?.let { err ->
+                    StaleDataBanner(err.type)
+                    Spacer(GlanceModifier.height(4.dp))
                 }
-                Spacer(GlanceModifier.height(8.dp))
-                Text(
-                    text = "距重置 ${Formatters.countdown(countdownSeconds)} · ${Constants.RESET_HOUR_BEIJING}:00(UTC+8)",
-                    style = TextStyle(fontSize = 11.sp, color = ColorProvider(Orange))
-                )
+                StatsContent(renderingData, countdownSeconds)
             }
             usage is Resource.Error -> {
+                // No cached fallback yet (cold-start fail). Show the same set
+                // of friendly, action-oriented messages as above, mapped from
+                // the error type. The misleading v1.6.1 "Account ID 错误"
+                // raw backend message is intentionally NOT surfaced —
+                // see CloudflareRepositoryImpl for the more accurate text
+                // we now generate.
                 val msg = when (usage.type) {
                     ErrorType.NETWORK -> "网络异常，点击刷新重试"
                     ErrorType.UNAUTHORIZED -> "凭据无效，请在应用中重新配置"
                     ErrorType.RATE_LIMITED -> "接口限流，请稍后刷新"
-                    else -> usage.message
+                    ErrorType.GRAPHQL -> "获取失败，点击刷新重试"
+                    ErrorType.UNKNOWN -> "未知错误，点击刷新重试"
                 }
                 CenterHint(msg)
             }
@@ -231,6 +263,61 @@ private fun WidgetContent(
             else -> CenterHint("加载中…")
         }
     }
+}
+
+/**
+ * Renders the three-column stats panel, used both for fresh data and for the
+ * stale-data fallback. Pulled out of [WidgetContent] to keep the `when`
+ * branches small and legible.
+ */
+@Composable
+private fun StatsContent(d: UsageData, countdownSeconds: Long) {
+    Text(
+        text = "已用 ${Formatters.thousands(d.totalUsed)} (${Formatters.percent(d.usagePercent)}%)",
+        style = TextStyle(
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Medium,
+            color = GlanceTheme.colors.onSurface
+        )
+    )
+    Spacer(GlanceModifier.height(6.dp))
+    LinearProgressIndicator(
+        progress = d.fraction,
+        modifier = GlanceModifier.fillMaxWidth().height(10.dp).cornerRadius(6.dp),
+        color = ColorProvider(Brand),
+        backgroundColor = GlanceTheme.colors.surfaceVariant
+    )
+    Spacer(GlanceModifier.height(10.dp))
+    Row(modifier = GlanceModifier.fillMaxWidth()) {
+        StatCell("WORKERS", Formatters.thousands(d.workersRequests), Green, GlanceModifier.defaultWeight())
+        StatCell("PAGES", Formatters.thousands(d.pagesRequests), Brand, GlanceModifier.defaultWeight())
+        StatCell("配额", Formatters.thousands(d.dailyQuota), Orange, GlanceModifier.defaultWeight())
+    }
+    Spacer(GlanceModifier.height(8.dp))
+    Text(
+        text = "距重置 ${Formatters.countdown(countdownSeconds)} · ${Constants.RESET_HOUR_BEIJING}:00(UTC+8)",
+        style = TextStyle(fontSize = 11.sp, color = ColorProvider(Orange))
+    )
+}
+
+/**
+ * Tiny banner shown above the stats when the widget is rendering cached data
+ * because the latest fetch errored. Keeps the user informed without erasing
+ * their previous view of the quota.
+ */
+@Composable
+private fun StaleDataBanner(lastErrorType: ErrorType) {
+    val hint = when (lastErrorType) {
+        ErrorType.NETWORK -> "⚠ 网络异常，数据显示可能已过时"
+        ErrorType.RATE_LIMITED -> "⚠ 接口限流，数据显示可能已过时"
+        ErrorType.GRAPHQL -> "⚠ 获取失败，数据显示可能已过时"
+        else -> "⚠ 数据获取异常，点击刷新重试"
+    }
+    Text(
+        text = hint,
+        style = TextStyle(fontSize = 11.sp, color = ColorProvider(Orange)),
+        modifier = GlanceModifier.fillMaxWidth()
+    )
 }
 
 /**

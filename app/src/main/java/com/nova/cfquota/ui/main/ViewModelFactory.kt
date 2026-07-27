@@ -28,10 +28,16 @@ class UsageViewModelFactory(private val container: AppContainer) : ViewModelProv
                 // app just fetched into the widget's reactive store (no second
                 // network call), then poke every Glance instance so any dead
                 // session restarts and picks the fresh state up.
+                //
+                // v1.6.2: we also set `lastSuccess = data` here so the widget's
+                // stale-data fallback has a fresh "last good snapshot" to
+                // render if the next auto-refresh fails. Resetting lastSuccess
+                // to null would defeat the entire purpose of the v1.6.2 fix.
                 widgetUpdater = { data ->
                     WidgetStore.state.value = WidgetState(
                         loading = false,
                         usage = Resource.Success(data),
+                        lastSuccess = data,
                         updatedAtMillis = System.currentTimeMillis()
                     )
                     updateAllWidgets(container.appContext)

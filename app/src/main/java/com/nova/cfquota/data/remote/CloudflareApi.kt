@@ -139,7 +139,7 @@ class CloudflareApi {
             .header("Authorization", "Bearer $apiToken")
             .header("Content-Type", "application/json")
             .header("Accept", "application/json")
-            .header("User-Agent", "CfQuotaMonitor/1.6.1 (Android)")
+            .header("User-Agent", "CfQuotaMonitor/1.6.2 (Android)")
             // Force the edge to return the freshest data — defeat any HTTP cache.
             .header("Cache-Control", "no-cache, no-store")
             .header("Pragma", "no-cache")
@@ -152,6 +152,7 @@ class CloudflareApi {
         var rawOrErr: String? = null
         var parsed: GraphQlResponse? = null
         var exception: String? = null
+        var bodyParseFailed = false
 
         try {
             client.newCall(req).execute().use { resp ->
@@ -160,6 +161,14 @@ class CloudflareApi {
                 rawOrErr = raw
                 parsed = runCatching { json.decodeFromString<GraphQlResponse>(raw) }
                     .getOrNull()
+                // No exception but the body was a 200 with un-parseable JSON
+                // (e.g. HTTP/2 stream truncation, empty body, Cloudflare edge
+                // hiccup). Without this marker the repository layer would
+                // silently misclassify it as "account not found", painting a
+                // spurious "Account ID 错误" hint on the home-screen widget —
+                // see v1.6.2 release notes. Treat as a transient failure so
+                // the caller can retry exactly once.
+                bodyParseFailed = (parsed == null && raw.isNotBlank())
             }
         } catch (e: Throwable) {
             exception = "${e.javaClass.simpleName}: ${e.message ?: "<no message>"}"
@@ -175,7 +184,7 @@ class CloudflareApi {
             bodyHash = rawOrErr?.let { sha256Short(it) } ?: "—",
             bodyLength = rawOrErr?.length ?: 0,
             error = exception,
-            ok = exception == null && statusCode in 200..299
+            ok = exception == null && statusCode in 200..299 && parsed != null
         )
         appendJournal(log)
 
@@ -185,7 +194,24 @@ class CloudflareApi {
                 body = null,
                 raw = exception,
                 elapsedMs = elapsed,
-                requestId = requestId
+                requestId = requestId,
+                bodyParseFailed = false,
+                transientFailure = true
+            )
+        } else if (bodyParseFailed) {
+            // HTTP success status (probably 200) but body could not be decoded
+            // into a GraphQlResponse — distinguish from an outright exception.
+            // This is almost always a Cloudflare edge blip / HTTP/2 truncation
+            // and is exactly the case the repository retry targets.
+            Log.w(tag, "request $requestId bodyParseFailed status=$statusCode bodyLen=${rawOrErr?.length ?: 0}")
+            ApiResult(
+                statusCode = statusCode,
+                body = null,
+                raw = rawOrErr ?: "",
+                elapsedMs = elapsed,
+                requestId = requestId,
+                bodyParseFailed = true,
+                transientFailure = true
             )
         } else {
             ApiResult(
@@ -193,7 +219,9 @@ class CloudflareApi {
                 body = parsed,
                 raw = rawOrErr ?: "",
                 elapsedMs = elapsed,
-                requestId = requestId
+                requestId = requestId,
+                bodyParseFailed = false,
+                transientFailure = false
             )
         }
     }
@@ -233,5 +261,20 @@ data class ApiResult(
     val body: GraphQlResponse?,
     val raw: String,
     val elapsedMs: Long = 0L,
-    val requestId: String = ""
+    val requestId: String = "",
+    /**
+     * `true` when the HTTP call returned an OK-ish status (typically 200) but
+     * the body could not be decoded as a valid GraphQL response. This is almost
+     * always a Cloudflare edge blip / HTTP/2 truncation. Distinct from a thrown
+     * exception path (where [transientFailure] is set via `exception != null`
+     * AND `body == null`). The repository layer treats both the same way for
+     * the purposes of the one-shot retry.
+     */
+    val bodyParseFailed: Boolean = false,
+    /**
+     * Aggregated "should the caller retry once?" flag — combines outright
+     * network/IO exceptions with [bodyParseFailed]. Authoritative signal for
+     * the repository to decide whether to silently retry.
+     */
+    val transientFailure: Boolean = false
 )
