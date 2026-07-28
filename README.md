@@ -12,7 +12,7 @@
 
 
 
-![Version](https://img.shields.io/badge/Version-1.6.1-2F65EC)
+![Version](https://img.shields.io/badge/Version-1.6.6-2F65EC)
 
 ![License](https://img.shields.io/badge/License-MIT-green)
 
@@ -98,7 +98,7 @@ Cloudflare 免费版 Workers 每天有 10 万次请求额度，但官方仪表�
 ## 🔨 从源码编译
 
 ```bash
-git clone https://github.com/<your-username>/cf-quota-monitor.git
+git clone https://github.com/1258798399-maker/CF-Quota-Monitor.git
 cd cf-quota-monitor
 
 # 需要 JDK 17 与 Android SDK (compileSdk 36)
@@ -127,6 +127,11 @@ A: Token 仅存储在本机，经 Android Keystore 硬件级 AES/GCM 加密，Ap
 
 | 版本      | 亮点                                   |
 | ------- | ------------------------------------ |
+| 1.6.6   | 小组件"最后刷新"时间内联至"距重置"行，100% 还原 v1.6.2 布局，彻底修复不显示问题 |
+| 1.6.5   | 小组件布局压实以容纳"最后刷新"行                  |
+| 1.6.4   | 应用升级后强制重绘所有已放置的小组件实例               |
+| 1.6.3   | 新增"最后刷新"显示（小组件内，与 App 内一致）           |
+| 1.6.2   | 修复网络良好时误报"未找到账户"，保留上次成功数据 + 过期提示    |
 | 1.6.1   | 修复小组件刷新按钮（Glance 会话机制陷阱），状态流驱动重构     |
 | 1.6.0   | 设置页 + 后台自动刷新 + 小组件点击进 App + 清除配置二次确认 |
 | 1.5.x   | 全链路禁缓存、GraphQL 查询精度对齐、排版修复           |
