@@ -1,5 +1,3 @@
-\<div align="center">
-
 # ⚡ CF Quota Monitor
 
 **一款极简、精准、开源的 Cloudflare Workers 每日配额监控 Android 应用**
