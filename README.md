@@ -16,8 +16,6 @@
 
 ![License](https://img.shields.io/badge/License-MIT-green)
 
-\</div>
-
 ---
 
 ## ✨ 它解决什么问题？
